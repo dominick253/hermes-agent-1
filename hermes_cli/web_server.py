@@ -5906,6 +5906,33 @@ def _apply_model_assignment_sync(
 
         save_config(cfg)
 
+        # ── Sync running agents' _primary_runtime so restore_primary_runtime()
+        #    doesn't revert the switch on the next turn (closes #65201, #50944,
+        #    #52496, #45954, #40480 — all share this same stale-cache root). ──
+        try:
+            from gateway.run import _gateway_runner_ref
+
+            gw = _gateway_runner_ref()
+            if gw is not None:
+                cache_lock = getattr(gw, "_agent_cache_lock", None)
+                cache = getattr(gw, "_agent_cache", None)
+                if cache and cache_lock:
+                    with cache_lock:
+                        for _entry in cache.values():
+                            agent = (
+                                _entry[0] if isinstance(_entry, tuple) else _entry
+                            )
+                            pr = getattr(agent, "_primary_runtime", None)
+                            if pr is not None:
+                                pr["model"] = model
+                                pr["provider"] = provider
+                                if base_url:
+                                    pr["base_url"] = base_url
+                                else:
+                                    pr.pop("base_url", None)
+        except Exception as _e:
+            _log.debug("Failed to sync _primary_runtime on model set", exc_info=_e)
+
         # Register a named ``custom_providers`` entry for a custom/local
         # endpoint, mirroring the ``hermes model`` custom flow
         # (_save_custom_provider). Without this the endpoint only lives in
